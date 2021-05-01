@@ -1,0 +1,266 @@
+Resources:    
+    S3Bucket:
+        Type: "AWS::S3::Bucket"
+        Properties:
+            BucketName: "wpbucket-shibbywan.ovh"
+
+    S3BucketPolicy:
+        Type: "AWS::S3::BucketPolicy"
+        Properties:
+            Bucket: !Ref S3Bucket
+            PolicyDocument: 
+                Version: "2008-10-17"
+                Id: "PolicyForCloudFrontPrivateContent"
+                Statement: 
+                  - 
+                    Sid: "1"
+                    Effect: "Allow"
+                    Principal: 
+                        AWS: !Sub "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${CloudFrontCloudFrontOriginAccessIdentity}"
+                    Action: "s3:GetObject"
+                    Resource: !Sub "arn:aws:s3:::${S3Bucket}/*"
+
+    CloudFrontCloudFrontOriginAccessIdentity:
+        Type: "AWS::CloudFront::CloudFrontOriginAccessIdentity"
+        Properties:
+            CloudFrontOriginAccessIdentityConfig: 
+                Comment: "shibbywan.ovh"
+
+    CloudFrontDistribution:
+        Type: "AWS::CloudFront::Distribution"
+        Properties:
+            DistributionConfig: 
+                Origins: 
+                  - 
+                    ConnectionAttempts: 3
+                    ConnectionTimeout: 10
+                    DomainName: !Sub "${S3Bucket}.s3.amazonaws.com"
+                    Id: !Sub "S3-${S3Bucket}"
+                    OriginPath: ""
+                    S3OriginConfig: 
+                        OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontCloudFrontOriginAccessIdentity}"
+                OriginGroups: 
+                    Quantity: 0
+                DefaultCacheBehavior: 
+                    AllowedMethods: 
+                      - "HEAD"
+                      - "GET"
+                    CachedMethods: 
+                      - "HEAD"
+                      - "GET"
+                    Compress: false
+                    DefaultTTL: 86400
+                    ForwardedValues: 
+                        Cookies: 
+                            Forward: "none"
+                        QueryString: false
+                    MaxTTL: 31536000
+                    MinTTL: 0
+                    SmoothStreaming: false
+                    TargetOriginId: !Sub "S3-${S3Bucket}"
+                    ViewerProtocolPolicy: "allow-all"
+                Comment: ""
+                PriceClass: "PriceClass_All"
+                Enabled: true
+                ViewerCertificate: 
+                    CloudFrontDefaultCertificate: true
+                    MinimumProtocolVersion: "TLSv1"
+                Restrictions: 
+                    GeoRestriction: 
+                        RestrictionType: "none"
+                HttpVersion: "http2"
+                DefaultRootObject: ""
+                IPV6Enabled: true
+                
+    RDSDBSubnetGroup:
+        Type: "AWS::RDS::DBSubnetGroup"
+        Properties:
+            DBSubnetGroupDescription: "Default Subnet Group"
+            DBSubnetGroupName: "DefaultSubnetGroup"
+            SubnetIds: 
+              - "subnet-0b2168adcf1d51fe3"
+              - "subnet-07ef9acb41e0fb75b"
+
+    RDSDBInstance:
+        Type: "AWS::RDS::DBInstance"
+        Properties:
+            DBSnapshotIdentifier: "wordpress01"
+            DBInstanceIdentifier: "wordpress"
+            AllocatedStorage: 20
+            DBInstanceClass: "db.t3.micro"
+            Engine: "mysql"
+            MasterUsername: "admin"
+            MasterUserPassword: "wordpress"
+            PreferredBackupWindow: "06:59-07:29"
+            BackupRetentionPeriod: 7
+            PreferredMaintenanceWindow: "mon:09:28-mon:09:58"
+            MultiAZ: true
+            EngineVersion: "8.0.20"
+            AutoMinorVersionUpgrade: true
+            LicenseModel: "general-public-license"
+            PubliclyAccessible: false
+            StorageType: "gp2"
+            Port: 3306
+            StorageEncrypted: false
+            CopyTagsToSnapshot: true
+            MonitoringInterval: 0
+            EnableIAMDatabaseAuthentication: false
+            EnablePerformanceInsights: false
+            DeletionProtection: false
+            DBSubnetGroupName: !Ref RDSDBSubnetGroup
+            VPCSecurityGroups: 
+              - "sg-00aadd33675ed2d5d"
+            DBParameterGroupName: "default.mysql8.0"
+            OptionGroupName: "default:mysql-8-0"
+            CACertificateIdentifier: "rds-ca-2019"
+
+    AutoScalingLaunchConfiguration:
+        Type: "AWS::AutoScaling::LaunchConfiguration"
+        Properties:
+            LaunchConfigurationName: "LaunchConfig"
+            ImageId: "ami-05c3fe03d9ccdc680"
+            KeyName: "WordpressDocker1"
+            SecurityGroups: 
+              - "sg-0e01bc09e7d026c0d"
+            UserData:
+                Fn::Base64: !Sub |
+                   #!/bin/bash -xe
+                   docker run --name wordpress -e WORDPRESS_DB_HOST=wordpress.c0hrhu5h77de.us-east-2.rds.amazonaws.com:3306 -e WORDPRESS_DB_USER=admin -e WORDPRESS_DB_PASSWORD=wordpress -e WORDPRESS_DB_NAME=wordpress -p 80:80 -v "$PWD/wordpress":/var/www/html -d wordpress 
+                   sleep 10
+                   docker exec wordpress curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+                   docker exec wordpress php wp-cli.phar --allow-root plugin install amazon-s3-and-cloudfront  --activate                               
+            InstanceType: "t2.micro"
+            InstanceMonitoring: true
+            EbsOptimized: false
+            AssociatePublicIpAddress: true
+                
+    ElasticLoadBalancingV2TargetGroup:
+        Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+        Properties:
+            HealthCheckIntervalSeconds: 30
+            HealthCheckPath: "/"
+            Port: 80
+            Protocol: "HTTP"
+            HealthCheckPort: "traffic-port"
+            HealthCheckProtocol: "HTTP"
+            HealthCheckTimeoutSeconds: 5
+            UnhealthyThresholdCount: 2
+            TargetType: "instance"
+            Matcher: 
+                HttpCode: "200"
+            HealthyThresholdCount: 5
+            VpcId: "vpc-0d859f34cb8141018"
+            Name: "TargetGroup"
+            HealthCheckEnabled: true
+            TargetGroupAttributes: 
+              - 
+                Key: "stickiness.enabled"
+                Value: "true"
+
+    AutoScalingAutoScalingGroup:
+        Type: "AWS::AutoScaling::AutoScalingGroup"
+        Properties:
+            AutoScalingGroupName: "AutoScalingGroup"
+            LaunchConfigurationName: !Ref AutoScalingLaunchConfiguration
+            MinSize: 1
+            MaxSize: 1
+            DesiredCapacity: 1
+            Cooldown: 300
+            AvailabilityZones: 
+              - !Sub "${AWS::Region}b"
+            TargetGroupARNs: 
+              - !Ref ElasticLoadBalancingV2TargetGroup
+            HealthCheckType: "EC2"
+            HealthCheckGracePeriod: 300
+            VPCZoneIdentifier: 
+              - "subnet-0b2168adcf1d51fe3"
+            TerminationPolicies: 
+              - "Default"
+            MetricsCollection: 
+              -
+                Granularity: "1Minute"
+                Metrics: 
+                  - "GroupInServiceInstances"
+                  - "GroupPendingCapacity"
+                  - "GroupPendingInstances"
+                  - "GroupTerminatingCapacity"
+                  - "GroupTotalInstances"
+                  - "GroupStandbyCapacity"
+                  - "GroupMaxSize"
+                  - "GroupMinSize"
+                  - "GroupStandbyInstances"
+                  - "GroupInServiceCapacity"
+                  - "GroupDesiredCapacity"
+                  - "GroupTotalCapacity"
+                  - "GroupTerminatingInstances"
+
+    ElasticLoadBalancingV2LoadBalancer:
+        Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+        Properties:
+            Name: "LoadBalancing"
+            Scheme: "internet-facing"
+            Type: "application"
+            Subnets: 
+              - "subnet-0b2168adcf1d51fe3"
+              - "subnet-07ef9acb41e0fb75b"
+            SecurityGroups: 
+              - "sg-0fa91787ddffab381"
+            IpAddressType: "ipv4"
+            
+    ElasticLoadBalancingV2Listener:
+        Type: "AWS::ElasticLoadBalancingV2::Listener"
+        Properties:
+            LoadBalancerArn: !Ref ElasticLoadBalancingV2LoadBalancer
+            Port: 80
+            Protocol: "HTTP"
+            DefaultActions: 
+              - 
+                TargetGroupArn: !Ref ElasticLoadBalancingV2TargetGroup
+                Type: "forward"
+    SNSTopic:
+        Type: "AWS::SNS::Topic"
+        Properties:
+            DisplayName: "RSNS01"
+            TopicName: "RSNS01"
+
+    SNSSubscription:
+        Type: "AWS::SNS::Subscription"
+        Properties:
+            TopicArn: !Ref SNSTopic
+            Endpoint: "shibbywandimsu@gmail.com"
+            Protocol: "email"
+            Region: !Ref AWS::Region
+
+    CloudWatchAlarm:
+        Type: "AWS::CloudWatch::Alarm"
+        Properties:
+            AlarmName: "CPUA"
+            AlarmDescription: "CPU Utilisation Alarm V01"
+            ActionsEnabled: true
+            AlarmActions: 
+              - !Ref AutoScalingScalingPolicy
+              - !Ref SNSTopic
+            MetricName: "CPUUtilization"
+            Namespace: "AWS/EC2"
+            Statistic: "Average"
+            Dimensions: 
+              - 
+                Name: "AutoScalingGroupName"
+                Value: "AutoScalingGroup"
+            Period: 300
+            EvaluationPeriods: 1
+            Threshold: 80
+            ComparisonOperator: "GreaterThanOrEqualToThreshold"
+
+    AutoScalingScalingPolicy:
+        Type: "AWS::AutoScaling::ScalingPolicy"
+        DependsOn: AutoScalingAutoScalingGroup
+        Properties:
+            AutoScalingGroupName: "AutoScalingGroup"
+            PolicyType: "StepScaling"
+            AdjustmentType: "ChangeInCapacity"
+            StepAdjustments: 
+              - 
+                MetricIntervalLowerBound: 0
+                ScalingAdjustment: 1
+            MetricAggregationType: "Average"

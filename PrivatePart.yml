@@ -1,0 +1,77 @@
+Resources:
+    Intranet:
+        Type: "AWS::EC2::Instance"
+        Properties:
+            ImageId: "ami-0f46f7b9d91976f6c"
+            InstanceType: "t2.micro"
+            KeyName: "intranet"
+            AvailabilityZone: !Sub "${AWS::Region}a"
+            Tenancy: "default"
+            SubnetId: "subnet-07ef9acb41e0fb75b"
+            SecurityGroupIds: 
+              - "sg-0341f2eabbddbcc14"
+            SourceDestCheck: true 
+            Tags: 
+              - 
+                Key: "Name"
+                Value: "Intranet"
+
+    CustomerGateway:
+        Type: "AWS::EC2::CustomerGateway"
+        Properties:
+            BgpAsn: 65000
+            IpAddress: "90.70.96.58"
+            Type: "ipsec.1"
+            Tags: 
+              - 
+                Key: "Name"
+                Value: "CustomerGateway"
+
+    VPNGateway:
+        Type: "AWS::EC2::VPNGateway"
+        Properties:
+            Type: "ipsec.1"
+            Tags: 
+              - 
+                Key: "Name"
+                Value: "VirtualPrivateGateway"
+       
+    VPCGatewayAttachment:
+        Type: "AWS::EC2::VPCGatewayAttachment"
+        Properties:
+            VpnGatewayId: !Ref VPNGateway
+            VpcId: "vpc-0d859f34cb8141018"
+             
+    VPNConnection:
+        Type: "AWS::EC2::VPNConnection"
+        Properties:
+            Type: "ipsec.1"
+            StaticRoutesOnly: true
+            CustomerGatewayId: !Ref CustomerGateway
+            VpnGatewayId: !Ref VPNGateway
+            Tags: 
+              - 
+                Key: "Name"
+                Value: "VPNConnexion"
+                
+    VPNConnectionRoute:
+        Type: "AWS::EC2::VPNConnectionRoute"
+        Properties:
+            VpnConnectionId: !Ref VPNConnection
+            DestinationCidrBlock: "192.168.100.0/24"    
+ 
+    VPNGatewayRoutePropagation:
+        Type: AWS::EC2::VPNGatewayRoutePropagation
+        DependsOn: VPCGatewayAttachment 
+        Properties: 
+            RouteTableIds: 
+            - "rtb-0b0a7a79b5fd4b9a6"
+            VpnGatewayId: !Ref VPNGateway 
+    
+    PrivateRoute:
+        Type: "AWS::EC2::Route"
+        DependsOn: VPCGatewayAttachment
+        Properties:
+            DestinationCidrBlock: "0.0.0.0/0"
+            GatewayId: !Ref VPNGateway 
+            RouteTableId: "rtb-0b0a7a79b5fd4b9a6"
