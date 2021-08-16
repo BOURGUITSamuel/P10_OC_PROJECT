@@ -47,7 +47,7 @@ Les scripts ont été conçus avec le langage YAML
 
 Chaque élément de l'infrastructure a été testé manuellement avant de procéder à leur automatisation
 
-Les instances ec2 ont étés configurés avec une AMI Amazon Linux
+Les instances ec2 ont étés configurées avec une AMI Amazon Linux
 
 La connexion Site to Site a été  établie entre la passerelle VPN AWS et une machine virtuelle PFSENSE 
 
